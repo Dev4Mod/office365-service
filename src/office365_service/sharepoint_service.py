@@ -200,13 +200,13 @@ class SharepointService:
                 raise FileNotFoundError(f"A pasta de destino '{pasta_destino}' não foi encontrada.")
             pasta_destino = pasta
 
-        url_destino = os.path.join(pasta_destino.properties['ServerRelativeUrl'], arquivo_origem.name)
+        print(f"Movendo '{arquivo_origem.name}' para '{pasta_destino.name}'...")
 
-        print(f"Movendo '{arquivo_origem.name}' para '{pasta_destino.properties['ServerRelativeUrl']}'...")
-        arquivo_origem.copyto(url_destino, True).execute_query()
-        arquivo_origem.delete_object().execute_query()
-        print("Arquivo movido com sucesso.")
-        return self.ctx.web.get_file_by_server_relative_url(url_destino)
+        novo_arquivo = arquivo_origem.moveto(pasta_destino, flag=1)
+        novo_arquivo.execute_query()
+
+        return novo_arquivo
+
 
     @handle_sharepoint_errors()
     def copiar_arquivo(self, arquivo_origem: File, pasta_destino: Folder | str):
