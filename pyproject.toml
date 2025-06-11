@@ -1,0 +1,17 @@
+[project]
+name = "office365-service"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "Dev4Mod", email = "wellingtonmods@gmail.com" }
+]
+requires-python = ">=3.10"
+dependencies = [
+    "hatchling>=1.27.0",
+    "office365-rest-python-client>=2.6.2",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
