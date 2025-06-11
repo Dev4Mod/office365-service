@@ -106,9 +106,9 @@ class SharepointService:
     def obter_arquivo(self, caminho_arquivo: str) -> File | None:
         """Obtém um objeto File a partir do seu caminho relativo no servidor."""
         try:
-            folder = self.ctx.web.get_file_by_server_relative_url(caminho_arquivo)
-            folder.get().execute_query()
-            return folder
+            file = self.ctx.web.get_file_by_server_relative_url(caminho_arquivo)
+            file.get().execute_query()
+            return file
         except ClientRequestException as e:
             if e.response.status_code == 404:
                 return None
@@ -122,8 +122,8 @@ class SharepointService:
             if pasta is None:
                 raise FileNotFoundError(f"A pasta '{pasta_alvo}' não foi encontrada.")
             pasta_alvo = pasta
-
-        files = pasta_alvo.files.expand(["ModifiedBy"]).get().execute_query()
+        files = pasta_alvo.files
+        files.expand(["ModifiedBy"]).get().execute_query()
         return files
 
     @handle_sharepoint_errors()
@@ -200,7 +200,6 @@ class SharepointService:
                 raise FileNotFoundError(f"A pasta de destino '{pasta_destino}' não foi encontrada.")
             pasta_destino = pasta
 
-        # Constrói a URL de destino
         url_destino = os.path.join(pasta_destino.properties['ServerRelativeUrl'], arquivo_origem.name)
 
         print(f"Movendo '{arquivo_origem.name}' para '{pasta_destino.properties['ServerRelativeUrl']}'...")
@@ -223,7 +222,21 @@ class SharepointService:
         print("Arquivo copiado com sucesso.")
         return novo_arquivo
 
+    @handle_sharepoint_errors()
+    def renomear_arquivo(self, arquivo: File, novo_nome: str) -> File:
+        """Renomeia um arquivo no SharePoint."""
+        print(f"Renomeando '{arquivo.name}' para '{novo_nome}'...")
+        novo_arquivo = arquivo.rename(novo_nome)
+        novo_arquivo.execute_query()
+        print("Arquivo renomeado com sucesso.")
+        return novo_arquivo
+
     def obter_pasta_por_nome(self, pasta_raiz: Folder, nome):
         pastas = list(self.listar_pastas(pasta_raiz))
         pasta_encontrada = next((pasta for pasta in pastas if nome in pasta.name), None)
         return pasta_encontrada
+
+    def obter_arquivo_por_nome(self, pasta: Folder, nome):
+        arquivos = list(self.listar_arquivos(pasta))
+        arquivo_encontrado = next((arquivo for arquivo in arquivos if nome in arquivo.name), None)
+        return arquivo_encontrado
