@@ -168,7 +168,7 @@ class SharepointService:
             file_to_download = arquivo_sp
 
         with open(caminho_download, "wb") as local_file:
-            file_to_download.download(local_file)
+            file_to_download.download_session(local_file).execute_query()
         print(f"Arquivo '{os.path.basename(str(arquivo_sp))}' baixado para '{caminho_download}'.")
 
     @handle_sharepoint_errors()
