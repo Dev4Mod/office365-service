@@ -140,24 +140,44 @@ class SharepointService:
         return folders
 
     @handle_sharepoint_errors()
-    def criar_pasta(self, pasta_pai: Folder | str, nome_nova_pasta: str):
-        """Cria uma nova pasta se ela ainda não existir."""
+    def criar_pasta(self, pasta_pai: Folder | str, nome_pasta: str):
+        """
+        Cria uma nova pasta no Sharepoint, suportando criação de subpastas com "/"
+
+        Args:
+            pasta_pai: Caminho ou objeto Folder onde a nova pasta será criada
+            nome_pasta: Nome da nova pasta a ser criada, pode incluir "/" para criar subpastas
+
+        Returns:
+            O objeto da pasta criada
+
+        Raises:
+            Exception: Se a pasta pai não for encontrada
+        """
         if isinstance(pasta_pai, str):
             pasta = self.obter_pasta(pasta_pai)
             if pasta is None:
-                raise FileNotFoundError(f"A pasta pai '{pasta_pai}' não foi encontrada.")
+                raise Exception(f"Pasta {pasta_pai} não encontrada")
             pasta_pai = pasta
 
-        # Verifica se a pasta já existe para evitar erro
-        pastas_existentes = self.listar_pastas(pasta_pai)
-        for p in pastas_existentes:
-            if p.name == nome_nova_pasta:
-                print(f"Pasta '{nome_nova_pasta}' já existe.")
-                return p
+        if "/" in nome_pasta:
+            path_parts = nome_pasta.split("/")
+            current_folder = pasta_pai
 
-        print(f"Criando pasta '{nome_nova_pasta}'...")
-        nova_pasta = pasta_pai.folders.add(nome_nova_pasta).execute_query()
-        return nova_pasta
+            for part in path_parts:
+                if part:
+                    current_folder = self.criar_pasta(current_folder, part)
+
+            return current_folder
+        else:
+            subpastas = self.listar_pastas(pasta_pai)
+            pasta = next((subpasta for subpasta in subpastas if nome_pasta in str(subpasta.name)), None)
+            if pasta is not None:
+                return pasta
+            print("Criando pasta {0}...".format(nome_pasta))
+            pasta = pasta_pai.folders.add(nome_pasta)
+            pasta.execute_query()
+            return pasta
 
     @handle_sharepoint_errors()
     def baixar_arquivo(self, arquivo_sp: File | str, caminho_download: str):
@@ -206,7 +226,6 @@ class SharepointService:
         novo_arquivo.execute_query()
 
         return novo_arquivo
-
 
     @handle_sharepoint_errors()
     def copiar_arquivo(self, arquivo_origem: File, pasta_destino: Folder | str):
