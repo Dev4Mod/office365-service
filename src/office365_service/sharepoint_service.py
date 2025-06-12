@@ -7,6 +7,7 @@ from office365.runtime.client_request_exception import ClientRequestException
 from office365.sharepoint.client_context import ClientContext
 from office365.sharepoint.files.file import File
 from office365.sharepoint.folders.folder import Folder
+from office365.sharepoint.sharing.links.kind import SharingLinkKind
 
 
 def handle_sharepoint_errors(max_retries=5, delay_seconds=3):
@@ -249,6 +250,12 @@ class SharepointService:
         novo_arquivo.execute_query()
         print("Arquivo renomeado com sucesso.")
         return novo_arquivo
+
+    @handle_sharepoint_errors()
+    def compartilhar_item(self, item: File | Folder, tipo: int):
+        resultado = item.share_link(tipo)
+        resultado.execute_query()
+        return resultado.value.sharingLinkInfo.Url
 
     def obter_pasta_por_nome(self, pasta_raiz: Folder, nome):
         pastas = list(self.listar_pastas(pasta_raiz))
