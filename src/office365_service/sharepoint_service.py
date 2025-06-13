@@ -7,7 +7,6 @@ from office365.runtime.client_request_exception import ClientRequestException
 from office365.sharepoint.client_context import ClientContext
 from office365.sharepoint.files.file import File
 from office365.sharepoint.folders.folder import Folder
-from office365.sharepoint.sharing.links.kind import SharingLinkKind
 
 
 def handle_sharepoint_errors(max_retries=5, delay_seconds=3):
@@ -26,7 +25,11 @@ def handle_sharepoint_errors(max_retries=5, delay_seconds=3):
                     return func(self, *args, **kwargs)
                 except ClientRequestException as e:
                     last_exception = e
-                    if e.response.status_code == 403:
+                    if e.response.status_code == 429:
+                        print(f"Erro 429 (Muitas solicitações) detectado. Aguardando 60 segundos...")
+                        time.sleep(60)
+                        continue
+                    elif e.response.status_code == 403:
                         print("Erro 403 (Proibido) detectado. Tentando relogar...")
                         if not (self.username and self.password):
                             print("Credenciais não disponíveis para relogin. Abortando.")
@@ -35,7 +38,6 @@ def handle_sharepoint_errors(max_retries=5, delay_seconds=3):
                         if self.login(self.username, self.password):
                             print("Relogin bem-sucedido. Tentando a operação novamente.")
                             try:
-                                # Tenta a operação mais uma vez após o relogin
                                 return func(self, *args, **kwargs)
                             except ClientRequestException as e2:
                                 print(f"A operação falhou mesmo após o relogin: {e2}")
