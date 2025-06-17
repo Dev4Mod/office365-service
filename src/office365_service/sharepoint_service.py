@@ -27,7 +27,7 @@ def handle_sharepoint_errors(max_retries=5, delay_seconds=3):
                     last_exception = e
                     if e.response.status_code == 429:
                         print(f"Erro 429 (Muitas solicitações) detectado. Aguardando 60 segundos...")
-                        time.sleep(60)
+                        time.sleep(60 * (attempt+1))
                         continue
                     elif e.response.status_code == 403:
                         print("Erro 403 (Proibido) detectado. Tentando relogar...")
