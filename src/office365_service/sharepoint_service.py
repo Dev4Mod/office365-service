@@ -68,7 +68,7 @@ def handle_sharepoint_errors(max_retries: int = 5, delay_seconds: int = 3, timeo
                         else:
                             print("Falha ao relogar. Abortando.")
                             raise e
-                    elif e.response.status_code == 503:
+                    elif e.response.status_code == 503 or "503" in str(e):
                         print(
                             f"Erro 503 (Serviço Indisponível). Tentativa {attempt + 1}/{max_retries} em {delay_seconds}s...")
                         time.sleep(delay_seconds)
