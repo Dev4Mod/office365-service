@@ -1,6 +1,8 @@
 import os
 import time
 from functools import wraps
+import timeout_decorator
+from timeout_decorator import TimeoutError
 
 from office365.runtime.auth.user_credential import UserCredential
 from office365.runtime.client_request_exception import ClientRequestException
@@ -9,25 +11,49 @@ from office365.sharepoint.files.file import File
 from office365.sharepoint.folders.folder import Folder
 
 
-def handle_sharepoint_errors(max_retries=5, delay_seconds=3):
+def handle_sharepoint_errors(max_retries: int = 5, delay_seconds: int = 3, timeout_seconds: int = 120):
     """
     Decorador para tratar exceções de requisições do SharePoint, com lógica
-    de nova autenticação para erros 403 e novas tentativas para erros 503.
+    de nova autenticação, novas tentativas e controle de timeout.
+
+    Args:
+        max_retries (int): Número máximo de tentativas para erros recuperáveis.
+        delay_seconds (int): Atraso entre as tentativas.
+        timeout_seconds (int): Tempo máximo de espera para a execução da operação em segundos.
     """
 
     def decorator(func):
         @wraps(func)
         def wrapper(self, *args, **kwargs):
             last_exception = None
+
+            # Envolve a lógica de retentativas em uma função para aplicar o timeout a cada tentativa.
+            @timeout_decorator.timeout(timeout_seconds, use_signals=False)
+            def run_operation():
+                return func(self, *args, **kwargs)
+
             for attempt in range(max_retries):
                 try:
                     self.ctx.clear()
-                    return func(self, *args, **kwargs)
+                    # A chamada com timeout é feita aqui
+                    return run_operation()
+
+                except TimeoutError:
+                    # Se a operação exceder o tempo limite, capturamos o erro aqui.
+                    print(
+                        f"Erro: A operação '{func.__name__}' excedeu o tempo limite de {timeout_seconds} segundos. Tentativa {attempt + 1}/{max_retries}.")
+                    last_exception = TimeoutError(
+                        f"A operação '{func.__name__}' excedeu o tempo limite de {timeout_seconds}s.")
+                    # Continua para a próxima tentativa após um delay
+                    time.sleep(delay_seconds)
+                    continue
+
                 except ClientRequestException as e:
                     last_exception = e
                     if e.response.status_code == 429:
-                        print(f"Erro 429 (Muitas solicitações) detectado. Aguardando 60 segundos...")
-                        time.sleep(60 * (attempt+1))
+                        wait_time = 60 * (attempt + 1)
+                        print(f"Erro 429 (Muitas solicitações) detectado. Aguardando {wait_time} segundos...")
+                        time.sleep(wait_time)
                         continue
                     elif e.response.status_code == 403:
                         print("Erro 403 (Proibido) detectado. Tentando relogar...")
@@ -37,31 +63,25 @@ def handle_sharepoint_errors(max_retries=5, delay_seconds=3):
 
                         if self.login(self.username, self.password):
                             print("Relogin bem-sucedido. Tentando a operação novamente.")
-                            try:
-                                return func(self, *args, **kwargs)
-                            except ClientRequestException as e2:
-                                print(f"A operação falhou mesmo após o relogin: {e2}")
-                                raise e2
+                            # Tenta novamente a operação dentro do mesmo loop
+                            continue
                         else:
                             print("Falha ao relogar. Abortando.")
                             raise e
-                    # --- Erro de servidor (temporário) ---
                     elif e.response.status_code == 503:
                         print(
                             f"Erro 503 (Serviço Indisponível). Tentativa {attempt + 1}/{max_retries} em {delay_seconds}s...")
                         time.sleep(delay_seconds)
-                        continue  # Próxima iteração do loop de retentativa
-                    # --- Outros erros de cliente/servidor ---
+                        continue
                     else:
                         print(f"Erro não recuperável encontrado: {e}")
                         raise e
+
                 except Exception as e:
-                    # Captura outras exceções (ex: problemas de rede)
                     print(f"Uma exceção inesperada ocorreu: {e}. Tentando novamente em {delay_seconds}s...")
                     last_exception = e
                     time.sleep(delay_seconds)
 
-            # Se todas as tentativas falharem, lança a última exceção capturada
             print(f"A operação '{func.__name__}' falhou após {max_retries} tentativas.")
             raise last_exception
 
@@ -71,7 +91,6 @@ def handle_sharepoint_errors(max_retries=5, delay_seconds=3):
 
 
 class SharepointService:
-
     def __init__(self, site_url: str):
         self.site_url = site_url
         self.ctx = ClientContext(self.site_url)
@@ -106,18 +125,6 @@ class SharepointService:
             raise e
 
     @handle_sharepoint_errors()
-    def obter_arquivo(self, caminho_arquivo: str) -> File | None:
-        """Obtém um objeto File a partir do seu caminho relativo no servidor."""
-        try:
-            file = self.ctx.web.get_file_by_server_relative_url(caminho_arquivo)
-            file.get().execute_query()
-            return file
-        except ClientRequestException as e:
-            if e.response.status_code == 404:
-                return None
-            raise e
-
-    @handle_sharepoint_errors()
     def listar_arquivos(self, pasta_alvo: Folder | str):
         """Lista todos os arquivos dentro de uma pasta específica."""
         if isinstance(pasta_alvo, str):
@@ -128,6 +135,18 @@ class SharepointService:
         files = pasta_alvo.files
         files.expand(["ModifiedBy"]).get().execute_query()
         return files
+
+    @handle_sharepoint_errors()
+    def obter_arquivo(self, caminho_arquivo: str) -> File | None:
+        """Obtém um objeto File a partir do seu caminho relativo no servidor."""
+        try:
+            file = self.ctx.web.get_file_by_server_relative_url(caminho_arquivo)
+            file.get().execute_query()
+            return file
+        except ClientRequestException as e:
+            if e.response.status_code == 404:
+                return None
+            raise e
 
     @handle_sharepoint_errors()
     def listar_pastas(self, pasta_pai: Folder | str):

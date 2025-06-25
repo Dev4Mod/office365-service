@@ -1,6 +1,6 @@
 [project]
 name = "office365-service"
-version = "0.1.7"
+version = "0.1.8"
 description = "Add your description here"
 readme = "README.md"
 authors = [
@@ -10,6 +10,7 @@ requires-python = ">=3.10"
 dependencies = [
     "hatchling>=1.27.0",
     "office365-rest-python-client>=2.6.2",
+    "timeout-decorator>=0.5.0",
 ]
 
 [build-system]
