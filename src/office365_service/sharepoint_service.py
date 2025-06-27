@@ -275,11 +275,11 @@ class SharepointService:
     def obter_pasta_por_nome(self, pasta_raiz: Folder, nome: str) -> Folder | None:
         """Busca uma subpasta pelo nome exato dentro de uma pasta raiz."""
         pastas = self.listar_pastas(pasta_raiz)
-        pasta_encontrada = next((pasta for pasta in pastas if pasta.name == nome), None)
+        pasta_encontrada = next((pasta for pasta in pastas if nome in pasta.name), None)
         return pasta_encontrada
 
     def obter_arquivo_por_nome(self, pasta: Folder, nome: str) -> File | None:
         """Busca um arquivo pelo nome exato dentro de uma pasta."""
         arquivos = self.listar_arquivos(pasta)
-        arquivo_encontrado = next((arquivo for arquivo in arquivos if arquivo.name == nome), None)
+        arquivo_encontrado = next((arquivo for arquivo in arquivos if nome in arquivo.name), None)
         return arquivo_encontrado
