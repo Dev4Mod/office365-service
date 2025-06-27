@@ -1,8 +1,8 @@
 import os
 import time
 from functools import wraps
-import timeout_decorator
-from timeout_decorator import TimeoutError
+
+import requests
 
 from office365.runtime.auth.user_credential import UserCredential
 from office365.runtime.client_request_exception import ClientRequestException
@@ -11,15 +11,14 @@ from office365.sharepoint.files.file import File
 from office365.sharepoint.folders.folder import Folder
 
 
-def handle_sharepoint_errors(max_retries: int = 5, delay_seconds: int = 3, timeout_seconds: int = 120):
+def handle_sharepoint_errors(max_retries: int = 5, delay_seconds: int = 3):
     """
     Decorador para tratar exceções de requisições do SharePoint, com lógica
-    de nova autenticação, novas tentativas e controle de timeout.
+    de nova autenticação e novas tentativas para erros comuns.
 
     Args:
         max_retries (int): Número máximo de tentativas para erros recuperáveis.
         delay_seconds (int): Atraso entre as tentativas.
-        timeout_seconds (int): Tempo máximo de espera para a execução da operação em segundos.
     """
 
     def decorator(func):
@@ -27,35 +26,29 @@ def handle_sharepoint_errors(max_retries: int = 5, delay_seconds: int = 3, timeo
         def wrapper(self, *args, **kwargs):
             last_exception = None
 
-            # Envolve a lógica de retentativas em uma função para aplicar o timeout a cada tentativa.
-            @timeout_decorator.timeout(timeout_seconds, use_signals=False)
-            def run_operation():
-                return func(self, *args, **kwargs)
-
             for attempt in range(max_retries):
                 try:
-                    self.ctx.clear()
-                    # A chamada com timeout é feita aqui
-                    return run_operation()
+                    # A chamada da função original acontece aqui.
+                    return func(self, *args, **kwargs)
 
-                except TimeoutError:
-                    # Se a operação exceder o tempo limite, capturamos o erro aqui.
+                except requests.exceptions.Timeout as e:
+                    # Captura a exceção de timeout da biblioteca 'requests'.
                     print(
-                        f"Erro: A operação '{func.__name__}' excedeu o tempo limite de {timeout_seconds} segundos. Tentativa {attempt + 1}/{max_retries}.")
-                    last_exception = TimeoutError(
-                        f"A operação '{func.__name__}' excedeu o tempo limite de {timeout_seconds}s.")
-                    # Continua para a próxima tentativa após um delay
+                        f"Erro: A operação '{func.__name__}' excedeu o tempo limite de {self.timeout} segundos. "
+                        f"Tentativa {attempt + 1}/{max_retries}...")
+                    last_exception = e
                     time.sleep(delay_seconds)
                     continue
 
                 except ClientRequestException as e:
                     last_exception = e
-                    if e.response.status_code == 429:
-                        wait_time = 60 * (attempt + 1)
-                        print(f"Erro 429 (Muitas solicitações) detectado. Aguardando {wait_time} segundos...")
-                        time.sleep(wait_time)
+                    if e.response.status_code == 429:  # Too Many Requests
+                        # O SharePoint pode retornar um header 'Retry-After'
+                        retry_after = int(e.response.headers.get("Retry-After", 60 * (attempt + 1)))
+                        print(f"Erro 429 (Muitas solicitações) detectado. Aguardando {retry_after} segundos...")
+                        time.sleep(retry_after)
                         continue
-                    elif e.response.status_code == 403:
+                    elif e.response.status_code == 403:  # Forbidden
                         print("Erro 403 (Proibido) detectado. Tentando relogar...")
                         if not (self.username and self.password):
                             print("Credenciais não disponíveis para relogin. Abortando.")
@@ -63,18 +56,18 @@ def handle_sharepoint_errors(max_retries: int = 5, delay_seconds: int = 3, timeo
 
                         if self.login(self.username, self.password):
                             print("Relogin bem-sucedido. Tentando a operação novamente.")
-                            # Tenta novamente a operação dentro do mesmo loop
                             continue
                         else:
                             print("Falha ao relogar. Abortando.")
                             raise e
-                    elif e.response.status_code == 503 or "503" in str(e):
+                    elif e.response.status_code in [503, 504]:  # Service Unavailable / Gateway Timeout
                         print(
-                            f"Erro 503 (Serviço Indisponível). Tentativa {attempt + 1}/{max_retries} em {delay_seconds}s...")
+                            f"Erro {e.response.status_code} (Servidor indisponível/sobrecarregado). "
+                            f"Tentativa {attempt + 1}/{max_retries} em {delay_seconds}s...")
                         time.sleep(delay_seconds)
                         continue
                     else:
-                        print(f"Erro não recuperável encontrado: {e}")
+                        print(f"Erro de cliente não recuperável encontrado: {e}")
                         raise e
 
                 except Exception as e:
@@ -91,13 +84,30 @@ def handle_sharepoint_errors(max_retries: int = 5, delay_seconds: int = 3, timeo
 
 
 class SharepointService:
-    def __init__(self, site_url: str):
+    def __init__(self, site_url: str, timeout_seconds: int = 90):
+        """
+        Inicializa o serviço do SharePoint.
+
+        Args:
+            site_url (str): A URL do site do SharePoint.
+            timeout_seconds (int): O tempo em segundos para o timeout de cada requisição.
+        """
         self.site_url = site_url
         self.ctx = ClientContext(self.site_url)
         self.username = None
         self.password = None
+        self.timeout = timeout_seconds
 
-    def login(self, username, password):
+        # **SOLUÇÃO**: Adiciona um manipulador de eventos para definir o timeout ANTES de cada requisição.
+        self.ctx.pending_request().beforeExecute += self._set_request_timeout
+
+    def _set_request_timeout(self, request_options):
+        """
+        Este método é chamado antes de cada requisição para injetar o parâmetro de timeout.
+        """
+        request_options.timeout = self.timeout
+
+    def login(self, username: str, password: str) -> bool:
         """Autentica no site do SharePoint usando as credenciais fornecidas."""
         print(f"Fazendo login no SharePoint com o usuário {username}...")
         self.username = username
@@ -108,7 +118,7 @@ class SharepointService:
             self.ctx.execute_query()
             print("Login realizado com sucesso.")
             return True
-        except ClientRequestException as e:
+        except (ClientRequestException, requests.exceptions.Timeout) as e:
             print(f"Erro ao fazer login: {e}")
             return False
 
@@ -163,19 +173,7 @@ class SharepointService:
 
     @handle_sharepoint_errors()
     def criar_pasta(self, pasta_pai: Folder | str, nome_pasta: str):
-        """
-        Cria uma nova pasta no Sharepoint, suportando criação de subpastas com "/"
-
-        Args:
-            pasta_pai: Caminho ou objeto Folder onde a nova pasta será criada
-            nome_pasta: Nome da nova pasta a ser criada, pode incluir "/" para criar subpastas
-
-        Returns:
-            O objeto da pasta criada
-
-        Raises:
-            Exception: Se a pasta pai não for encontrada
-        """
+        """Cria uma nova pasta no Sharepoint, suportando criação de subpastas com "/" """
         if isinstance(pasta_pai, str):
             pasta = self.obter_pasta(pasta_pai)
             if pasta is None:
@@ -185,33 +183,35 @@ class SharepointService:
         if "/" in nome_pasta:
             path_parts = nome_pasta.split("/")
             current_folder = pasta_pai
-
             for part in path_parts:
                 if part:
                     current_folder = self.criar_pasta(current_folder, part)
-
             return current_folder
         else:
-            subpastas = self.listar_pastas(pasta_pai)
-            pasta = next((subpasta for subpasta in subpastas if nome_pasta in str(subpasta.name)), None)
+            subpastas = list(self.listar_pastas(pasta_pai))
+            pasta = next((subpasta for subpasta in subpastas if nome_pasta == subpasta.name), None)
             if pasta is not None:
                 return pasta
-            print("Criando pasta {0}...".format(nome_pasta))
-            pasta = pasta_pai.folders.add(nome_pasta)
-            pasta.execute_query()
+            print(f"Criando pasta {nome_pasta}...")
+            pasta = pasta_pai.folders.add(nome_pasta).execute_query()
             return pasta
 
     @handle_sharepoint_errors()
     def baixar_arquivo(self, arquivo_sp: File | str, caminho_download: str):
         """Baixa um arquivo do SharePoint para um caminho local."""
+        nome_arquivo = ""
         if isinstance(arquivo_sp, str):
-            file_to_download = self.ctx.web.get_file_by_server_relative_url(arquivo_sp)
+            file_to_download = self.obter_arquivo(arquivo_sp)
+            if file_to_download is None:
+                raise FileNotFoundError(f"Arquivo '{arquivo_sp}' não encontrado no SharePoint.")
+            nome_arquivo = file_to_download.name
         else:
             file_to_download = arquivo_sp
+            nome_arquivo = arquivo_sp.name
 
         with open(caminho_download, "wb") as local_file:
-            file_to_download.download_session(local_file).execute_query()
-        print(f"Arquivo '{os.path.basename(str(arquivo_sp))}' baixado para '{caminho_download}'.")
+            file_to_download.download(local_file).execute_query()
+        print(f"Arquivo '{nome_arquivo}' baixado para '{caminho_download}'.")
 
     @handle_sharepoint_errors()
     def enviar_arquivo(self, pasta_destino: Folder | str, arquivo_local: str, nome_arquivo_sp: str = None):
@@ -222,14 +222,12 @@ class SharepointService:
                 raise FileNotFoundError(f"A pasta de destino '{pasta_destino}' não foi encontrada.")
             pasta_destino = pasta
 
-        if not nome_arquivo_sp:
-            nome_arquivo_sp = os.path.basename(arquivo_local)
+        nome_arquivo_sp = nome_arquivo_sp or os.path.basename(arquivo_local)
 
         with open(arquivo_local, 'rb') as file_content:
-            fbytes = file_content.read()
+            print(f"Enviando arquivo '{nome_arquivo_sp}'...")
+            arquivo = pasta_destino.files.upload(nome_arquivo_sp, file_content).execute_query()
 
-        print(f"Enviando arquivo '{nome_arquivo_sp}'...")
-        arquivo = pasta_destino.upload_file(nome_arquivo_sp, fbytes).execute_query()
         print(f"Arquivo '{nome_arquivo_sp}' enviado com sucesso!")
         return arquivo
 
@@ -242,15 +240,13 @@ class SharepointService:
                 raise FileNotFoundError(f"A pasta de destino '{pasta_destino}' não foi encontrada.")
             pasta_destino = pasta
 
-        print(f"Movendo '{arquivo_origem.name}' para '{pasta_destino.name}'...")
-
-        novo_arquivo = arquivo_origem.moveto(pasta_destino, flag=1)
-        novo_arquivo.execute_query()
-
-        return novo_arquivo
+        print(f"Movendo '{arquivo_origem.name}' para '{pasta_destino.serverRelativeUrl}'...")
+        novo_caminho = f"{pasta_destino.serverRelativeUrl}/{arquivo_origem.name}"
+        arquivo_origem.moveto(novo_caminho, 1).execute_query()
+        print("Arquivo movido com sucesso.")
 
     @handle_sharepoint_errors()
-    def copiar_arquivo(self, arquivo_origem: File, pasta_destino: Folder | str):
+    def copiar_arquivo(self, arquivo_origem: File, pasta_destino: Folder | str, novo_nome: str = None):
         """Copia um arquivo para outra pasta."""
         if isinstance(pasta_destino, str):
             pasta = self.obter_pasta(pasta_destino)
@@ -258,32 +254,32 @@ class SharepointService:
                 raise FileNotFoundError(f"A pasta de destino '{pasta_destino}' não foi encontrada.")
             pasta_destino = pasta
 
-        print(f"Copiando '{arquivo_origem.name}' para '{pasta_destino.name}'...")
-        novo_arquivo = arquivo_origem.copyto(pasta_destino, True).execute_query()
+        nome_final = novo_nome or arquivo_origem.name
+        print(f"Copiando '{arquivo_origem.name}' para '{pasta_destino.serverRelativeUrl}/{nome_final}'...")
+        arquivo_origem.copyto(f"{pasta_destino.serverRelativeUrl}/{nome_final}", True).execute_query()
         print("Arquivo copiado com sucesso.")
-        return novo_arquivo
 
     @handle_sharepoint_errors()
-    def renomear_arquivo(self, arquivo: File, novo_nome: str) -> File:
+    def renomear_arquivo(self, arquivo: File, novo_nome: str):
         """Renomeia um arquivo no SharePoint."""
         print(f"Renomeando '{arquivo.name}' para '{novo_nome}'...")
-        novo_arquivo = arquivo.rename(novo_nome)
-        novo_arquivo.execute_query()
+        arquivo.rename(novo_nome).execute_query()
         print("Arquivo renomeado com sucesso.")
-        return novo_arquivo
 
     @handle_sharepoint_errors()
-    def compartilhar_item(self, item: File | Folder, tipo: int):
-        resultado = item.share_link(tipo)
-        resultado.execute_query()
+    def compartilhar_item(self, item: File | Folder, tipo: int = 0):
+        """Cria um link de compartilhamento para um item. tipo 0: View, 1: Edit"""
+        resultado = item.share_link(tipo).execute_query()
         return resultado.value.sharingLinkInfo.Url
 
-    def obter_pasta_por_nome(self, pasta_raiz: Folder, nome):
-        pastas = list(self.listar_pastas(pasta_raiz))
-        pasta_encontrada = next((pasta for pasta in pastas if nome in pasta.name), None)
+    def obter_pasta_por_nome(self, pasta_raiz: Folder, nome: str) -> Folder | None:
+        """Busca uma subpasta pelo nome exato dentro de uma pasta raiz."""
+        pastas = self.listar_pastas(pasta_raiz)
+        pasta_encontrada = next((pasta for pasta in pastas if pasta.name == nome), None)
         return pasta_encontrada
 
-    def obter_arquivo_por_nome(self, pasta: Folder, nome):
-        arquivos = list(self.listar_arquivos(pasta))
-        arquivo_encontrado = next((arquivo for arquivo in arquivos if nome in arquivo.name), None)
+    def obter_arquivo_por_nome(self, pasta: Folder, nome: str) -> File | None:
+        """Busca um arquivo pelo nome exato dentro de uma pasta."""
+        arquivos = self.listar_arquivos(pasta)
+        arquivo_encontrado = next((arquivo for arquivo in arquivos if arquivo.name == nome), None)
         return arquivo_encontrado
