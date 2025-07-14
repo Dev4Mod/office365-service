@@ -7,9 +7,11 @@ from office365.runtime.client_request_exception import ClientRequestException
 from office365.sharepoint.client_context import ClientContext
 from office365.sharepoint.files.file import File
 from office365.sharepoint.folders.folder import Folder
+from office365.runtime.http.request_options import RequestOptions
 
 
-def handle_sharepoint_errors(max_retries: int = 5, delay_seconds: int = 3, timeout_seconds: int = 120):
+
+def handle_sharepoint_errors(max_retries: int = 5, delay_seconds: int = 3):
     """
     Decorador para tratar exceções de requisições do SharePoint, com lógica
     de nova autenticação, novas tentativas e controle de timeout.
@@ -17,7 +19,6 @@ def handle_sharepoint_errors(max_retries: int = 5, delay_seconds: int = 3, timeo
     Args:
         max_retries (int): Número máximo de tentativas para erros recuperáveis.
         delay_seconds (int): Atraso entre as tentativas.
-        timeout_seconds (int): Tempo máximo de espera para a execução da operação em segundos.
     """
 
     def decorator(func):
@@ -87,7 +88,7 @@ class SharepointService:
 
         self.ctx.pending_request().beforeExecute += self._set_request_timeout
 
-    def _set_request_timeout(self, request_options):
+    def _set_request_timeout(self, request_options: RequestOptions):
         """
         Este método é chamado antes de cada requisição para injetar o parâmetro de timeout.
         """
@@ -192,7 +193,6 @@ class SharepointService:
             pasta = next((subpasta for subpasta in subpastas if nome_pasta in str(subpasta.name)), None)
             if pasta is not None:
                 return pasta
-            print("Criando pasta {0}...".format(nome_pasta))
             pasta = pasta_pai.folders.add(nome_pasta)
             pasta.execute_query()
             return pasta
@@ -207,7 +207,6 @@ class SharepointService:
 
         with open(caminho_download, "wb") as local_file:
             file_to_download.download_session(local_file).execute_query()
-        print(f"Arquivo '{os.path.basename(str(arquivo_sp))}' baixado para '{caminho_download}'.")
 
     @handle_sharepoint_errors()
     def enviar_arquivo(self, pasta_destino: Folder | str, arquivo_local: str, nome_arquivo_sp: str = None):
@@ -224,9 +223,7 @@ class SharepointService:
         with open(arquivo_local, 'rb') as file_content:
             fbytes = file_content.read()
 
-        print(f"Enviando arquivo '{nome_arquivo_sp}'...")
         arquivo = pasta_destino.upload_file(nome_arquivo_sp, fbytes).execute_query()
-        print(f"Arquivo '{nome_arquivo_sp}' enviado com sucesso!")
         return arquivo
 
     @handle_sharepoint_errors()
@@ -237,8 +234,6 @@ class SharepointService:
             if pasta is None:
                 raise FileNotFoundError(f"A pasta de destino '{pasta_destino}' não foi encontrada.")
             pasta_destino = pasta
-
-        print(f"Movendo '{arquivo_origem.name}' para '{pasta_destino.name}'...")
 
         novo_arquivo = arquivo_origem.moveto(pasta_destino, flag=1)
         novo_arquivo.execute_query()
@@ -254,18 +249,14 @@ class SharepointService:
                 raise FileNotFoundError(f"A pasta de destino '{pasta_destino}' não foi encontrada.")
             pasta_destino = pasta
 
-        print(f"Copiando '{arquivo_origem.name}' para '{pasta_destino.name}'...")
         novo_arquivo = arquivo_origem.copyto(pasta_destino, True).execute_query()
-        print("Arquivo copiado com sucesso.")
         return novo_arquivo
 
     @handle_sharepoint_errors()
     def renomear_arquivo(self, arquivo: File, novo_nome: str) -> File:
         """Renomeia um arquivo no SharePoint."""
-        print(f"Renomeando '{arquivo.name}' para '{novo_nome}'...")
         novo_arquivo = arquivo.rename(novo_nome)
         novo_arquivo.execute_query()
-        print("Arquivo renomeado com sucesso.")
         return novo_arquivo
 
     @handle_sharepoint_errors()

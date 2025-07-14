@@ -1,6 +1,6 @@
 [project]
 name = "office365-service"
-version = "0.2.1"
+version = "0.2.2"
 description = "Add your description here"
 readme = "README.md"
 authors = [
@@ -15,3 +15,6 @@ dependencies = [
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.uv.sources]
+office365-rest-python-client = { git = "https://github.com/Dev4Mod/office365-rest-python-client.git" }
