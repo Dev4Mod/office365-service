@@ -10,7 +10,6 @@ from office365.sharepoint.folders.folder import Folder
 from office365.runtime.http.request_options import RequestOptions
 
 
-
 def handle_sharepoint_errors(max_retries: int = 5, delay_seconds: int = 3):
     """
     Decorador para tratar exceções de requisições do SharePoint, com lógica
@@ -99,15 +98,22 @@ class SharepointService:
         print(f"Fazendo login no SharePoint com o usuário {username}...")
         self.username = username
         self.password = password
-        try:
-            self.ctx.with_credentials(UserCredential(self.username, self.password))
-            self.ctx.load(self.ctx.web)
-            self.ctx.execute_query()
-            print("Login realizado com sucesso.")
-            return True
-        except ClientRequestException as e:
-            print(f"Erro ao fazer login: {e}")
-            return False
+        for attempt in range(3):
+            try:
+                self.ctx.clear()
+                self.ctx.with_credentials(UserCredential(username, password))
+                self.ctx.load(self.ctx.web)
+                self.ctx.execute_query()
+                print("Login realizado com sucesso.")
+                return True
+            except ClientRequestException as e:
+                print(f"Erro ao fazer login: {e}")
+                if attempt < 2:
+                    print(f"Tentando novamente (tentativa {attempt + 1}/3)...")
+                    time.sleep(3)
+                else:
+                    print("Falha após 3 tentativas. Abortando.")
+        return False
 
     @handle_sharepoint_errors()
     def obter_pasta(self, caminho_pasta: str) -> Folder | None:
