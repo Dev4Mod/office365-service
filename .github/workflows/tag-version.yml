@@ -1,0 +1,78 @@
+name: Create and Push Version Tag
+
+# Gatilho: Executa este workflow em cada push para a branch 'main'
+on:
+  push:
+    branches:
+      - master
+
+# Permissões: Concede ao workflow permissão para ler o conteúdo do repositório
+# e escrever (para poder criar e empurrar a tag).
+permissions:
+  contents: write
+
+jobs:
+  tag-version:
+    name: Tag Version from pyproject.toml
+    runs-on: ubuntu-latest
+
+    steps:
+      # Passo 1: Clona o repositório para o ambiente de execução do workflow
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          # Precisamos buscar todo o histórico para verificar as tags existentes
+          fetch-depth: 0
+
+      # Passo 2: Configura o ambiente Python para ler o arquivo .toml
+      # Mesmo que seja um comando simples, usar um setup garante a disponibilidade do Python.
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10' # Você pode ajustar para a sua versão de preferência
+
+      # Passo 3: Instala a biblioteca tomli para ler o arquivo TOML de forma segura
+      # tomli é a biblioteca padrão para ler .toml no Python 3.11+ e recomendada para versões anteriores.
+      - name: Install tomli
+        run: pip install tomli
+
+      # Passo 4: O passo principal - lê a versão, cria e empurra a tag
+      - name: Get version, create and push tag
+        id: get_version
+        run: |
+          echo "Lendo a versão do arquivo pyproject.toml..."
+
+          # Extrai a versão do pyproject.toml usando Python e tomli.
+          # Adapte o caminho ['project']['version'] se sua versão estiver em outro lugar (ex: ['tool']['poetry']['version'])
+          PROJECT_VERSION=$(python -c "import tomli; f = open('pyproject.toml', 'rb'); data = tomli.load(f); print(data['project']['version'])")
+
+          if [ -z "$PROJECT_VERSION" ]; then
+            echo "ERRO: Não foi possível encontrar a versão no pyproject.toml."
+            exit 1
+          fi
+
+          # Constrói o nome da tag no formato vX.Y.Z
+          TAG="v$PROJECT_VERSION"
+          echo "Versão encontrada: $PROJECT_VERSION"
+          echo "Tag a ser criada: $TAG"
+
+          # Verifica se a tag já existe no repositório
+          # git rev-parse usa a tag para encontrar o commit. Se falhar, a tag não existe.
+          if git rev-parse "$TAG" >/dev/null 2>&1; then
+            echo "A tag $TAG já existe. Nenhuma ação será tomada."
+            exit 0 # Termina o job com sucesso
+          fi
+
+          echo "A tag $TAG não existe. Criando e empurrando a tag..."
+
+          # Configura o Git com o nome e e-mail do bot do GitHub Actions
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          # Cria a tag apontando para o commit atual
+          git tag -a "$TAG" -m "Release version $TAG"
+
+          # Empurra a nova tag para o repositório remoto (origin)
+          git push origin "$TAG"
+
+          echo "Tag $TAG criada e empurrada com sucesso!"
