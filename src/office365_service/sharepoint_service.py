@@ -203,16 +203,61 @@ class SharepointService:
             pasta.execute_query()
             return pasta
 
-    @handle_sharepoint_errors()
-    def baixar_arquivo(self, arquivo_sp: File | str, caminho_download: str):
-        """Baixa um arquivo do SharePoint para um caminho local."""
+    def baixar_arquivo(self, arquivo_sp: File | str, caminho_download: str, max_tentativas: int = 3):
+        """
+        Baixa um arquivo do SharePoint para um caminho local, com verificação de integridade e novas tentativas.
+        """
         if isinstance(arquivo_sp, str):
-            file_to_download = self.ctx.web.get_file_by_server_relative_url(arquivo_sp)
+            file_to_download = self.obter_arquivo(arquivo_sp)
+            if file_to_download is None:
+                raise FileNotFoundError(f"Arquivo remoto '{arquivo_sp}' não encontrado.")
         else:
             file_to_download = arquivo_sp
+            # Garante que os metadados do arquivo (como o tamanho) estão carregados
+            file_to_download.get().execute_query()
 
-        with open(caminho_download, "wb") as local_file:
-            file_to_download.download_session(local_file).execute_query()
+        # O decorador @handle_sharepoint_errors em obter_arquivo já tratou erros de API aqui.
+        tamanho_remoto = file_to_download.length
+
+        for tentativa in range(max_tentativas):
+            print(f"Iniciando download de '{file_to_download.name}' (Tentativa {tentativa + 1}/{max_tentativas})...")
+
+            try:
+                with open(caminho_download, "wb") as local_file:
+                    file_to_download.download_session(local_file).execute_query()
+
+                # Verificação do tamanho do arquivo
+                tamanho_local = os.path.getsize(caminho_download)
+
+                if tamanho_local == tamanho_remoto:
+                    print(
+                        f"Download de '{file_to_download.name}' concluído e verificado com sucesso. Tamanho: {tamanho_local} bytes.")
+                    return  # Sucesso, sai da função
+                else:
+                    print(f"Falha na verificação de tamanho para '{file_to_download.name}'.")
+                    print(f"  -> Tamanho esperado: {tamanho_remoto} bytes")
+                    print(f"  -> Tamanho baixado:  {tamanho_local} bytes")
+
+            except Exception as e:
+                print(f"Ocorreu um erro durante o download na tentativa {tentativa + 1}/{max_tentativas}: {e}")
+
+            if tentativa < max_tentativas - 1:
+                print("Aguardando 5 segundos para tentar novamente...")
+                time.sleep(5)
+
+        # Se o loop terminar, todas as tentativas falharam.
+        print(f"Falha ao baixar o arquivo '{file_to_download.name}' após {max_tentativas} tentativas.")
+
+        # Tenta remover o arquivo parcial/corrompido
+        try:
+            if os.path.exists(caminho_download):
+                os.remove(caminho_download)
+                print(f"Arquivo parcial '{caminho_download}' removido.")
+        except OSError as e:
+            print(f"Não foi possível remover o arquivo parcial '{caminho_download}': {e}")
+
+        raise IOError(
+            f"Não foi possível baixar o arquivo '{file_to_download.name}' com o tamanho correto após {max_tentativas} tentativas.")
 
     @handle_sharepoint_errors()
     def enviar_arquivo(self, pasta_destino: Folder | str, arquivo_local: str, nome_arquivo_sp: str = None):
