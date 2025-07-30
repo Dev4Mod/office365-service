@@ -203,6 +203,7 @@ class SharepointService:
             pasta.execute_query()
             return pasta
 
+    @handle_sharepoint_errors()
     def baixar_arquivo(self, arquivo_sp: File | str, caminho_download: str, max_tentativas: int = 3):
         """
         Baixa um arquivo do SharePoint para um caminho local, com verificação de integridade e novas tentativas.
@@ -222,24 +223,20 @@ class SharepointService:
         for tentativa in range(max_tentativas):
             print(f"Iniciando download de '{file_to_download.name}' (Tentativa {tentativa + 1}/{max_tentativas})...")
 
-            try:
-                with open(caminho_download, "wb") as local_file:
-                    file_to_download.download_session(local_file).execute_query()
+            with open(caminho_download, "wb") as local_file:
+                file_to_download.download(local_file).execute_query()
 
-                # Verificação do tamanho do arquivo
-                tamanho_local = os.path.getsize(caminho_download)
+            # Verificação do tamanho do arquivo
+            tamanho_local = os.path.getsize(caminho_download)
 
-                if tamanho_local == tamanho_remoto:
-                    print(
-                        f"Download de '{file_to_download.name}' concluído e verificado com sucesso. Tamanho: {tamanho_local} bytes.")
-                    return  # Sucesso, sai da função
-                else:
-                    print(f"Falha na verificação de tamanho para '{file_to_download.name}'.")
-                    print(f"  -> Tamanho esperado: {tamanho_remoto} bytes")
-                    print(f"  -> Tamanho baixado:  {tamanho_local} bytes")
-
-            except Exception as e:
-                print(f"Ocorreu um erro durante o download na tentativa {tentativa + 1}/{max_tentativas}: {e}")
+            if tamanho_local == tamanho_remoto:
+                print(
+                    f"Download de '{file_to_download.name}' concluído e verificado com sucesso. Tamanho: {tamanho_local} bytes.")
+                return  # Sucesso, sai da função
+            else:
+                print(f"Falha na verificação de tamanho para '{file_to_download.name}'.")
+                print(f"  -> Tamanho esperado: {tamanho_remoto} bytes")
+                print(f"  -> Tamanho baixado:  {tamanho_local} bytes")
 
             if tentativa < max_tentativas - 1:
                 print("Aguardando 5 segundos para tentar novamente...")
