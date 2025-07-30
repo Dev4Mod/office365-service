@@ -143,7 +143,12 @@ class SharepointService:
     def obter_arquivo(self, caminho_arquivo: str) -> File | None:
         """Obtém um objeto File a partir do seu caminho relativo no servidor."""
         try:
-            file = self.ctx.web.get_file_by_server_relative_url(caminho_arquivo)
+            nome_arquivo = os.path.basename(caminho_arquivo)
+            caminho_arquivo = os.path.dirname(caminho_arquivo)
+            folder = self.obter_pasta(caminho_arquivo)
+            if folder is None:
+                raise FileNotFoundError(f"A pasta '{caminho_arquivo}' não foi encontrada.")
+            file = folder.files.get_by_url(nome_arquivo)
             file.get().execute_query()
             return file
         except ClientRequestException as e:
@@ -224,7 +229,8 @@ class SharepointService:
             print(f"Iniciando download de '{file_to_download.name}' (Tentativa {tentativa + 1}/{max_tentativas})...")
 
             with open(caminho_download, "wb") as local_file:
-                file_to_download.download(local_file).execute_query()
+                clone_file = self.obter_arquivo(file_to_download.serverRelativeUrl)
+                local_file.write(clone_file.read())
 
             # Verificação do tamanho do arquivo
             tamanho_local = os.path.getsize(caminho_download)
