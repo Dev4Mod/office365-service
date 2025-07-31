@@ -148,9 +148,13 @@ class SharepointService:
             folder = self.obter_pasta(caminho_arquivo)
             if folder is None:
                 raise FileNotFoundError(f"A pasta '{caminho_arquivo}' não foi encontrada.")
-            file = folder.files.get_by_url(nome_arquivo)
-            file.get().execute_query()
-            return file
+            files = folder.files
+            files.get().execute_query()
+            for file in files:
+                if file.name == nome_arquivo:
+                    return file
+            if not files:
+                raise FileNotFoundError(f"Nenhum arquivo encontrado na pasta '{caminho_arquivo}'.")
         except ClientRequestException as e:
             if e.response.status_code == 404:
                 return None
