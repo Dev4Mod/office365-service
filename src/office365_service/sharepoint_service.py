@@ -106,13 +106,14 @@ class SharepointService:
                 self.ctx.execute_query()
                 print("Login realizado com sucesso.")
                 return True
-            except ClientRequestException as e:
+            except Exception as e:
                 print(f"Erro ao fazer login: {e}")
                 if attempt < 2:
                     print(f"Tentando novamente (tentativa {attempt + 1}/3)...")
                     time.sleep(3)
                 else:
                     print("Falha após 3 tentativas. Abortando.")
+
         return False
 
     @handle_sharepoint_errors()
