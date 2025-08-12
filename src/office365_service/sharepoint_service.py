@@ -228,13 +228,16 @@ class SharepointService:
 
         # O decorador @handle_sharepoint_errors em obter_arquivo já tratou erros de API aqui.
         tamanho_remoto = file_to_download.length
+        unique_id = file_to_download.unique_id
 
         for tentativa in range(max_tentativas):
             print(f"Iniciando download de '{file_to_download.name}' (Tentativa {tentativa + 1}/{max_tentativas})...")
 
             with open(caminho_download, "wb") as local_file:
-                clone_file = self.obter_arquivo(file_to_download.serverRelativeUrl)
-                local_file.write(clone_file.read())
+                response = self.ctx.execute_request_direct("/Web/GetFileById('{0}')/$value".format(unique_id))
+                data = response.content
+                local_file.write(data)
+
 
             # Verificação do tamanho do arquivo
             tamanho_local = os.path.getsize(caminho_download)
