@@ -2,6 +2,8 @@ import os
 import time
 from functools import wraps
 
+from msal import SerializableTokenCache, PublicClientApplication
+from office365.runtime.auth.token_response import TokenResponse
 from office365.runtime.auth.user_credential import UserCredential
 from office365.runtime.client_request_exception import ClientRequestException
 from office365.sharepoint.client_context import ClientContext
@@ -37,6 +39,8 @@ def handle_sharepoint_errors(max_retries: int = 5, delay_seconds: int = 3):
                         continue
                     elif e.response.status_code == 403:
                         print("Erro 403 (Proibido) detectado. Tentando relogar...")
+                        if self.using_device:
+                            raise e
                         if not (self.username and self.password):
                             print("Credenciais não disponíveis para relogin. Abortando.")
                             raise e
@@ -71,6 +75,8 @@ def handle_sharepoint_errors(max_retries: int = 5, delay_seconds: int = 3):
 
 
 class SharepointService:
+    CACHE_TOKEN = "cache_token.json"
+
     def __init__(self, site_url: str, timeout_seconds: int = 90):
         """
         Inicializa o serviço do SharePoint.
@@ -79,12 +85,17 @@ class SharepointService:
             site_url (str): A URL do site do SharePoint.
             timeout_seconds (int): O tempo em segundos para o timeout de cada requisição.
         """
+        self.scopes = None
+        self.authority = None
+        self.client_id = None
+        self.using_device = False
         self.site_url = site_url
         self.ctx = ClientContext(self.site_url)
         self.username = None
         self.password = None
         self.timeout = timeout_seconds
-
+        self.cache = SerializableTokenCache()
+        self._load_token()
         self.ctx.pending_request().beforeExecute += self._set_request_timeout
 
     def _set_request_timeout(self, request_options: RequestOptions):
@@ -115,6 +126,50 @@ class SharepointService:
                     print("Falha após 3 tentativas. Abortando.")
 
         return False
+
+    def _load_token(self):
+        if os.path.exists(self.CACHE_TOKEN):
+            self.cache.deserialize(open(self.CACHE_TOKEN, "r").read())
+
+    def _save_cache(self):
+        if self.cache.has_state_changed:
+            with open(self.CACHE_TOKEN, "w") as f:
+                f.write(self.cache.serialize())
+
+    def login_device_code(self, client_id: str, authority: str, scopes: list[str]):
+        self.using_device = True
+        self.client_id = client_id
+        self.authority = authority
+        self.scopes = scopes
+        self.ctx = ClientContext(self.site_url)
+        self.ctx.with_access_token(self._refresh_token)
+        self.ctx.pending_request().beforeExecute += self._set_request_timeout
+        self.ctx.load(self.ctx.web)
+        self.ctx.execute_query()
+        print("✅ Token carregado e contexto SharePoint inicializado.")
+
+    def _refresh_token(self):
+        app = PublicClientApplication(client_id=self.client_id, authority=self.authority, token_cache=self.cache)
+
+        # tenta renovar silenciosamente
+        accounts = app.get_accounts()
+        result = None
+        if accounts:
+            result = app.acquire_token_silent(self.scopes, account=accounts[0])
+
+        if not result:
+            flow = app.initiate_device_flow(scopes=self.scopes)
+            print(flow["message"])
+            result = app.acquire_token_by_device_flow(flow)
+
+        if "access_token" in result:
+            self._save_cache()
+            access_token = result["access_token"]
+        else:
+            raise Exception("Erro:", result)
+
+        return TokenResponse(access_token=access_token, token_type="Bearer")
+
 
     @handle_sharepoint_errors()
     def obter_pasta(self, caminho_pasta: str) -> Folder | None:
@@ -151,11 +206,12 @@ class SharepointService:
                 raise FileNotFoundError(f"A pasta '{caminho_arquivo}' não foi encontrada.")
             files = folder.files
             files.get().execute_query()
+            if not files:
+                raise FileNotFoundError(f"Nenhum arquivo encontrado na pasta '{caminho_arquivo}'.")
             for file in files:
                 if file.name == nome_arquivo:
                     return file
-            if not files:
-                raise FileNotFoundError(f"Nenhum arquivo encontrado na pasta '{caminho_arquivo}'.")
+            return None
         except ClientRequestException as e:
             if e.response.status_code == 404:
                 return None
