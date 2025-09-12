@@ -37,10 +37,11 @@ def handle_sharepoint_errors(max_retries: int = 5, delay_seconds: int = 3):
                         print(f"Erro 429 (Muitas solicitações) detectado. Aguardando {wait_time} segundos...")
                         time.sleep(wait_time)
                         continue
-                    elif e.response.status_code == 403:
+                    elif e.response.status_code == 403 or e.response.status_code == 401:
                         print("Erro 403 (Proibido) detectado. Tentando relogar...")
                         if self.using_device:
-                            raise e
+                            self.ctx.authentication_context._cached_token = None
+                            continue
                         if not (self.username and self.password):
                             print("Credenciais não disponíveis para relogin. Abortando.")
                             raise e
@@ -56,6 +57,10 @@ def handle_sharepoint_errors(max_retries: int = 5, delay_seconds: int = 3):
                         print(
                             f"Erro 503 (Serviço Indisponível). Tentativa {attempt + 1}/{max_retries} em {delay_seconds}s...")
                         time.sleep(delay_seconds)
+                        continue
+                    elif "auth cookies" in str(e):
+                        print("Token expirado detectado. Tentando relogar...")
+                        self.ctx.authentication_context._cached_token = None
                         continue
                     else:
                         print(f"Erro não recuperável encontrado: {e}")
@@ -168,7 +173,7 @@ class SharepointService:
         else:
             raise Exception("Erro:", result)
 
-        return TokenResponse(access_token=access_token, token_type="Bearer")
+        return TokenResponse(access_token=access_token, token_type="Bearer", expiresIn = result["expires_in"])
 
 
     @handle_sharepoint_errors()
