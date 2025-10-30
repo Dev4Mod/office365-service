@@ -58,15 +58,15 @@ def handle_sharepoint_errors(max_retries: int = 5, delay_seconds: int = 3):
                             f"Erro 503 (Serviço Indisponível). Tentativa {attempt + 1}/{max_retries} em {delay_seconds}s...")
                         time.sleep(delay_seconds)
                         continue
-                    elif "auth cookies" in str(e):
-                        print("Token expirado detectado. Tentando relogar...")
-                        self.ctx.authentication_context._cached_token = None
-                        continue
                     else:
                         print(f"Erro não recuperável encontrado: {e}")
                         raise e
 
                 except Exception as e:
+                    if "auth cookies" in str(e):
+                        print("Token expirado detectado. Tentando relogar...")
+                        self.ctx.authentication_context._cached_token = None
+                        continue
                     print(f"Uma exceção inesperada ocorreu: {e}. Tentando novamente em {delay_seconds}s...")
                     last_exception = e
                     time.sleep(delay_seconds)
