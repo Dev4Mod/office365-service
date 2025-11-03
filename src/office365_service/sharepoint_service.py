@@ -24,12 +24,15 @@ def handle_sharepoint_errors(max_retries: int = 5, delay_seconds: int = 3):
 
     def decorator(func):
         @wraps(func)
-        def wrapper(self, *args, **kwargs):
+        def wrapper(self: "SharepointService", *args, **kwargs):
             last_exception = None
             for attempt in range(max_retries):
                 try:
                     self.ctx.clear()
-                    return func(self, *args, **kwargs)
+                    result = func(self, *args, **kwargs)
+                    if attempt > 0:
+                        print(f"Operação concluída com sucesso. Na tenativa {attempt + 1}")
+                    return result
                 except ClientRequestException as e:
                     last_exception = e
                     if e.response.status_code == 429:
@@ -173,8 +176,7 @@ class SharepointService:
         else:
             raise Exception("Erro:", result)
 
-        return TokenResponse(access_token=access_token, token_type="Bearer", expiresIn = result["expires_in"])
-
+        return TokenResponse(access_token=access_token, token_type="Bearer", expiresIn=result["expires_in"])
 
     @handle_sharepoint_errors()
     def obter_pasta(self, caminho_pasta: str) -> Folder | None:
@@ -299,7 +301,6 @@ class SharepointService:
                 response = self.ctx.execute_request_direct("/Web/GetFileById('{0}')/$value".format(unique_id))
                 data = response.content
                 local_file.write(data)
-
 
             # Verificação do tamanho do arquivo
             tamanho_local = os.path.getsize(caminho_download)
