@@ -43,7 +43,7 @@ def handle_sharepoint_errors(max_retries: int = 5, delay_seconds: int = 3):
                     elif e.response.status_code == 403 or e.response.status_code == 401:
                         print("Erro 403 (Proibido) detectado. Tentando relogar...")
                         if self.using_device:
-                            self.ctx.authentication_context._cached_token = None
+                            self.refresh_device_token()
                             continue
                         if not (self.username and self.password):
                             print("Credenciais não disponíveis para relogin. Abortando.")
@@ -66,9 +66,9 @@ def handle_sharepoint_errors(max_retries: int = 5, delay_seconds: int = 3):
                         raise e
 
                 except Exception as e:
-                    if "auth cookies" in str(e):
+                    if "auth cookies" in str(e).lower():
                         print("Token expirado detectado. Tentando relogar...")
-                        self.ctx.authentication_context._cached_token = None
+                        self.refresh_device_token()
                         continue
                     print(f"Uma exceção inesperada ocorreu: {e}. Tentando novamente em {delay_seconds}s...")
                     last_exception = e
@@ -144,6 +144,10 @@ class SharepointService:
             with open(self.CACHE_TOKEN, "w") as f:
                 f.write(self.cache.serialize())
 
+    def refresh_device_token(self):
+        if self.using_device and self.client_id and self.authority and self.scopes:
+            self.login_device_code(self.client_id, self.authority, self.scopes)
+
     def login_device_code(self, client_id: str, authority: str, scopes: list[str]):
         self.using_device = True
         self.client_id = client_id
@@ -154,7 +158,6 @@ class SharepointService:
         self.ctx.pending_request().beforeExecute += self._set_request_timeout
         self.ctx.load(self.ctx.web)
         self.ctx.execute_query()
-        print("✅ Token carregado e contexto SharePoint inicializado.")
 
     def _refresh_token(self):
         app = PublicClientApplication(client_id=self.client_id, authority=self.authority, token_cache=self.cache)
